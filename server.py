@@ -1,5 +1,3 @@
-# server.py
-
 import os
 import json
 import sqlite3
@@ -7,9 +5,53 @@ import sqlite3
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
-# Caminho absoluto do banco de dados
+# Caminho absoluto do banco de dados e diretórios
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.path.join(BASE_DIR, "database", "simulador.db")
+DB_DIR = os.path.join(BASE_DIR, "database")
+DB_PATH = os.path.join(DB_DIR, "simulador.db")
+
+# ---- [NOVO] FUNÇÃO PARA GARANTIR QUE AS TABELAS EXISTAM NA NUVEM ----
+def garantir_banco_existe():
+    # Se a pasta 'database' não existir no ambiente do Render, cria ela
+    if not os.path.exists(DB_DIR):
+        os.makedirs(DB_DIR)
+        
+    # Conecta ao banco (se o arquivo simulador.db não existir, o SQLite cria na hora)
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    # Cria a tabela de ambientes para que o SELECT do FastAPI não quebre
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS ambientes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nome TEXT NOT NULL,
+            largura REAL NOT NULL,
+            altura REAL NOT NULL,
+            cor TEXT NOT NULL,
+            capacidade_maxima INTEGER NOT NULL,
+            pos_x REAL DEFAULT 50,
+            pos_y REAL DEFAULT 50
+        )
+    """)
+    
+    # Cria a tabela de pessoas
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS pessoas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nome TEXT NOT NULL,
+            cor TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'Ausente',
+            ambiente_id INTEGER,
+            FOREIGN KEY (ambiente_id) REFERENCES ambientes(id) ON DELETE SET NULL
+        )
+    """)
+    
+    conn.commit()
+    conn.close()
+
+# Executa a validação estrutural do banco antes de subir o app FastAPI
+garantir_banco_existe()
+# ---------------------------------------------------------------------
 
 app = FastAPI(title="Servidor Simulador de Presença")
 

@@ -155,7 +155,7 @@ def main():
         asyncio.run_coroutine_threadsafe(manager.broadcast(payload), loop_api)
         
         # 2. Envia para a nuvem do Render para atualizar o App Mobile conectado remotamente
-        if "seu-subdominio" not in URL_RENDER_ATUALIZAR:
+        if "flowpulse-4e3g.onrender.com" not in URL_RENDER_ATUALIZAR:
             enviar_dados_para_render_async(dados_atualizados)
 
     controller.on_state_change_callback = disparar_notificacao_sistema
