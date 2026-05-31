@@ -161,17 +161,27 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Erro", "Parâmetros dimensionais inválidos.")
             return
 
-        self.controller.criar_ambiente(nome, largura, altura, self.cor_selecionada_ambiente, capacidade)
+        self.controller.criar_ambiente(nome, largura, altura, self.cor_selecionada_ambiente, capacity := capacidade)
         self.sincronizar_canvas_e_listas()
         self.txt_amb_nome.clear()
 
+        # [SINCRO NUVEM] Força envio imediato após inserção
+        if hasattr(self.controller, 'on_state_change_callback') and self.controller.on_state_change_callback:
+            self.controller.on_state_change_callback()
+
     def deletar_ambiente_clique(self):
         itens_selecionados = self.scene.selectedItems()
+        mudou = False
         for item in itens_selecionados:
             if isinstance(item, VisualAmbiente):
                 self.controller.remover_ambiente(item.ambiente.id)
                 self.scene.removeItem(item)
+                mudou = True
         self.sincronizar_canvas_e_listas()
+
+        # [SINCRO NUVEM] Força envio imediato após exclusão
+        if mudou and hasattr(self.controller, 'on_state_change_callback') and self.controller.on_state_change_callback:
+            self.controller.on_state_change_callback()
 
     def adicionar_pessoa_clique(self):
         nome = self.txt_pes_nome.text().strip()
@@ -182,12 +192,20 @@ class MainWindow(QMainWindow):
         self.sincronizar_canvas_e_listas()
         self.txt_pes_nome.clear()
 
+        # [SINCRO NUVEM] Força envio imediato após cadastro de pessoa
+        if hasattr(self.controller, 'on_state_change_callback') and self.controller.on_state_change_callback:
+            self.controller.on_state_change_callback()
+
     def deletar_pessoa_clique(self):
         item_atual = self.list_pessoas.currentItem()
         if item_atual:
             pessoa_id = item_atual.data(Qt.UserRole)
             self.controller.remover_pessoa(pessoa_id)
             self.sincronizar_canvas_e_listas()
+
+            # [SINCRO NUVEM] Força envio imediato após remoção de pessoa
+            if hasattr(self.controller, 'on_state_change_callback') and self.controller.on_state_change_callback:
+                self.controller.on_state_change_callback()
 
     def alternar_simulacao(self):
         if self.controller.simulacao_ativa:
@@ -205,6 +223,10 @@ class MainWindow(QMainWindow):
         self.btn_play.setStyleSheet("background-color: #27ae60;")
         self.sincronizar_canvas_e_listas()
 
+        # [SINCRO NUVEM] Zera o estado no Render imediatamente
+        if hasattr(self.controller, 'on_state_change_callback') and self.controller.on_state_change_callback:
+            self.controller.on_state_change_callback()
+
     def sincronizar_canvas_e_listas(self):
         # 1. Atualizar List Box de Pessoas de forma desacoplada
         self.list_pessoas.clear()
@@ -214,15 +236,12 @@ class MainWindow(QMainWindow):
             self.list_pessoas.addItem(item)
 
         # 2. Atualizar renderização gráfica no Canvas
-        # Mapeia itens já existentes para evitar recriações desnecessárias piscando na tela
         itens_existentes = {item.ambiente.id: item for item in self.scene.items() if isinstance(item, VisualAmbiente)}
         
-        # Remove do Canvas os que sumiram do controller
         for amb_id, item in itens_existentes.items():
             if amb_id not in self.controller.ambientes:
                 self.scene.removeItem(item)
 
-        # Adiciona ou atualiza os vigentes
         for amb in self.controller.ambientes.values():
             if amb.id in itens_existentes:
                 itens_existentes[amb.id].atualizar_visual()
@@ -230,16 +249,15 @@ class MainWindow(QMainWindow):
                 novo_visual = VisualAmbiente(amb, self.controller)
                 self.scene.addItem(novo_visual)
 
-        # 3. Limpar círculos antigos de pessoas da iteração de tela anterior
+        # 3. Limpar círculos antigos de pessoas
         for item in self.scene.items():
             if hasattr(item, "is_pessoa_marker"):
                 self.scene.removeItem(item)
 
-        # 4. Renderizar novas posições espaciais de círculos de pessoas dentro de retângulos
+        # 4. Renderizar novas posições espaciais
         escala = 30.0
         for amb in self.controller.ambientes.values():
             for p in amb.pessoas_presentes:
-                # Transforma a coordenada relativa interna para coordenada global absoluta do canvas
                 p_global_x = amb.pos_x + (p.canvas_x * escala)
                 p_global_y = amb.pos_y + (p.canvas_y * escala)
                 
