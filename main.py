@@ -4,9 +4,14 @@ import threading
 import asyncio
 import json
 import sqlite3
+import urllib.request  
 from PySide6.QtWidgets import QApplication
 from controllers.simulacao_controller import SimulacaoController
 from views.main_window import MainWindow
+
+# ---- CONFIGURAÇÃO DE PRODUÇÃO NUVEM ----
+URL_RENDER_ATUALIZAR = "https://flowpulse-4e3g.onrender.com/api/atualizar"
+# ----------------------------------------
 
 # ---- CÓDIGO DA API HTTP E WEBSOCKET ----
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -46,9 +51,12 @@ manager = ConnectionManager()
 
 def buscar_dados_atuais_json():
     """Função auxiliar para ler o banco de dados e estruturar o JSON de resposta"""
-    db_path = "simulador.db"
+    db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "database", "simulador.db")
     if not os.path.exists(db_path):
-        return {"erro": "Banco de dados não inicializado"}
+        # Fallback caso o banco esteja na raiz em tempo de execução
+        db_path = "simulador.db"
+        if not os.path.exists(db_path):
+            return {"erro": "Banco de dados não inicializado"}
         
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
@@ -106,6 +114,26 @@ def rodar_servidor_api(loop_compartilhado):
     # Configura o loop de eventos assíncronos correto para a thread do FastAPI
     asyncio.set_event_loop(loop_compartilhado)
     uvicorn.run(api, host="127.0.0.1", port=8000, log_level="warning")
+
+def enviar_dados_para_render_async(dados_json):
+    """Executa a requisição POST para o Render em uma thread separada para evitar engasgos na UI"""
+    def thread_post():
+        try:
+            payload = json.dumps(dados_json).encode('utf-8')
+            req = urllib.request.Request(
+                URL_RENDER_ATUALIZAR,
+                data=payload,
+                headers={'Content-Type': 'application/json'},
+                method='POST'
+            )
+            # Timeout curto de 3 segundos para não segurar a fila se a conexão oscilar
+            with urllib.request.urlopen(req, timeout=3) as response:
+                pass
+        except Exception as e:
+            print(f"[Nuvem] Falha ao sincronizar com o Render: {e}")
+
+    t = threading.Thread(target=thread_post, daemon=True)
+    t.start()
 # ----------------------------------------
 
 def main():
@@ -118,15 +146,19 @@ def main():
     # Criamos um loop de eventos assíncronos para a Thread do FastAPI conseguir gerenciar o WebSocket
     loop_api = asyncio.new_event_loop()
     
-    # Definimos o callback no controlador: quando a simulação rodar na interface desktop,
-    # ela executa uma função assíncrona dentro da thread do FastAPI para fazer o Broadcast
-    def disparar_notificacao_websocket():
+    # Gerenciador unificado de eventos de atualização
+    def disparar_notificacao_sistema():
         dados_atualizados = buscar_dados_atuais_json()
         payload = json.dumps(dados_atualizados)
-        # Injeta com segurança a tarefa de transmissão no loop assíncrono do servidor web
+        
+        # 1. Notifica o WebSocket Local (Se houver clientes locais conectados rodando em dev)
         asyncio.run_coroutine_threadsafe(manager.broadcast(payload), loop_api)
+        
+        # 2. Envia para a nuvem do Render para atualizar o App Mobile conectado remotamente
+        if "seu-subdominio" not in URL_RENDER_ATUALIZAR:
+            enviar_dados_para_render_async(dados_atualizados)
 
-    controller.on_state_change_callback = disparar_notificacao_websocket
+    controller.on_state_change_callback = disparar_notificacao_sistema
     
     # Inicializa o servidor FastAPI com o loop assíncrono dedicado
     api_thread = threading.Thread(target=rodar_servidor_api, args=(loop_api,), daemon=True)
